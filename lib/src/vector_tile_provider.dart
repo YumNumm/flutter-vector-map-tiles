@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart';
 import 'package:http/retry.dart';
 
@@ -63,6 +64,48 @@ class NetworkVectorTileProvider extends VectorTileProvider {
       throw ProviderException(message: e.message, retryable: Retryable.retry);
     } finally {
       client.close();
+    }
+  }
+
+  void _checkTile(TileIdentity tile) {
+    if (tile.z < 0 || tile.z > _maximumZoom || tile.x < 0 || tile.y < 0) {
+      throw Exception('out of range');
+    }
+  }
+
+  _isRetryable(int statusCode) => statusCode == 503 || statusCode == 408;
+}
+
+class AssetsVectorTileProvider extends VectorTileProvider {
+  final _UrlProvider _urlProvider;
+  final int _maximumZoom;
+
+  int get maximumZoom => _maximumZoom;
+
+  /// [urlTemplate] the URL template, e.g. `'assets/map_data/{z}/{x}/{y}.pbf'`
+  /// [maximumZoom] the maximum zoom supported by the tile provider, not to be
+  ///  confused with the maximum zoom of the map widget. The map widget will
+  ///  automatically use vector tiles from lower zoom levels once the maximum
+  ///  supported by this provider is reached.
+  AssetsVectorTileProvider({required String urlTemplate, int maximumZoom = 16})
+      : _urlProvider = _UrlProvider(urlTemplate),
+        _maximumZoom = maximumZoom;
+
+  @override
+  Future<Uint8List> provide(TileIdentity tile) async {
+    _checkTile(tile);
+    final max = pow(2, tile.z).toInt();
+    if (tile.x >= max || tile.y >= max || tile.x < 0 || tile.y < 0) {
+      throw ProviderException(
+          message: 'Invalid tile coordinates $tile',
+          retryable: Retryable.none,
+          statusCode: 400);
+    }
+    try {
+      final data = await rootBundle.load(_urlProvider.url(tile));
+      return data.buffer.asUint8List();
+    } on Exception catch (e) {
+      throw ProviderException(message: e.toString(), retryable: Retryable.none);
     }
   }
 
